@@ -33,6 +33,7 @@ jobs:
           cd engine
           git fetch --depth 1 origin 12ae8b574d588850535f24763f12363744702d19
           git checkout 12ae8b574d588850535f24763f12363744702d19
+          git submodule update --init --recursive
 
       - name: Fetch iOS dependencies
         run: |
