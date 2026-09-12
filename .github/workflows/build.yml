@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -61,7 +61,7 @@ jobs:
           file "$APP/Lona" | tee build/host-binary.txt
           shasum -a 256 build/LonaHost-unsigned.ipa | tee build/sha256.txt
 
-      - name: Upload native host
+      - name: Upload native host artifact
         uses: actions/upload-artifact@v4
         with:
           name: ios-host
@@ -69,5 +69,13 @@ jobs:
             build/LonaHost-unsigned.ipa
             build/sha256.txt
             build/host-binary.txt
-          retention-days: 1
+          retention-days: 30
           if-no-files-found: error
+
+      - name: Publish stable host download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          gh release view ios-host-latest >/dev/null 2>&1 || gh release create ios-host-latest --title "Latest iOS Host" --notes "Unsigned Lona iOS host used by the Windows one-click packager."
+          gh release upload ios-host-latest build/LonaHost-unsigned.ipa build/sha256.txt build/host-binary.txt --clobber
