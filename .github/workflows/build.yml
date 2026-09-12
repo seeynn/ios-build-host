@@ -33,9 +33,7 @@ jobs:
           cd engine
           git fetch --depth 1 origin 12ae8b574d588850535f24763f12363744702d19
           git checkout 12ae8b574d588850535f24763f12363744702d19
-          git config submodule.hmode7.url https://github.com/mateo-m/hmode7-apple-mobile.git
-          git submodule sync --recursive
-          git submodule update --init --recursive
+          git -c url."https://github.com/".insteadOf="git@github.com:" submodule update --init --recursive
 
       - name: Fetch iOS dependencies
         run: |
