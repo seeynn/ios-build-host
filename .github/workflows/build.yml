@@ -1,0 +1,72 @@
+name: iOS Host Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'port/**'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - name: Checkout build host
+        uses: actions/checkout@v5
+
+      - name: Environment
+        run: |
+          set -euxo pipefail
+          sw_vers
+          uname -m
+          xcodebuild -version
+
+      - name: Checkout Apple RGSS runtime
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 --branch dev https://github.com/mateo-m/mkxp-z-apple-mobile.git engine
+          cd engine
+          git fetch --depth 1 origin 12ae8b574d588850535f24763f12363744702d19
+          git checkout 12ae8b574d588850535f24763f12363744702d19
+
+      - name: Fetch iOS dependencies
+        run: |
+          set -euxo pipefail
+          chmod +x engine/tools/*.sh port/build-standalone-ios.sh
+          engine/tools/fetch-deps-ios.sh --sdk iphoneos
+
+      - name: Build unsigned ARM64 host IPA
+        run: |
+          set -euxo pipefail
+          ENGINE="$GITHUB_WORKSPACE/engine" OUT="$GITHUB_WORKSPACE/build" ./port/build-standalone-ios.sh
+
+      - name: Validate host IPA
+        run: |
+          set -euxo pipefail
+          test -s build/LonaHost-unsigned.ipa
+          rm -rf verify
+          mkdir verify
+          ditto -x -k build/LonaHost-unsigned.ipa verify
+          APP="$(find verify/Payload -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$APP"
+          test -x "$APP/Lona"
+          test -f "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist" | grep -Fx 'com.seeynn.lona'
+          file "$APP/Lona" | tee build/host-binary.txt
+          shasum -a 256 build/LonaHost-unsigned.ipa | tee build/sha256.txt
+
+      - name: Upload native host
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-host
+          path: |
+            build/LonaHost-unsigned.ipa
+            build/sha256.txt
+            build/host-binary.txt
+          retention-days: 1
+          if-no-files-found: error
