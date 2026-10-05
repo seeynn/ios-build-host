@@ -107,7 +107,7 @@ for idx,((label,status),logical_y) in enumerate(zip(labels,centers)):
 save_jpeg(im, PROJECTUI/"MainMenu.jpg")
 
 # Keep Patch 2 roster state cumulative but remove the proof-only suffix from the user-facing form name.
-roster = (ROOT/"v6/files/projectui/roster.properties").read_text(encoding="utf-8")
+roster = (ROOT/"v5/files/projectui/roster.properties").read_text(encoding="utf-8")
 roster = roster.replace("57=granolah|Granolah|Base (Signed Patch 2)|0", "57=granolah|Granolah|Base|0")
 (PROJECTUI/"roster.properties").write_text(roster, encoding="utf-8", newline="\n")
 
