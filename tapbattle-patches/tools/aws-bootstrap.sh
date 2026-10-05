@@ -92,8 +92,14 @@ echo "TAPBATTLE_AWS_KMS_KEY_ARN=$KEY_ARN"
 echo "TAPBATTLE_SIGNING_KEY_ID=release-2026-01"
 echo "GITHUB_OIDC_SUBJECT=$OIDC_SUBJECT"
 echo
+PUBLIC_OUT="$HOME/tapbattle-release-public.der.b64"
+openssl base64 -A -in "$PUB_DER" > "$PUBLIC_OUT"
+printf '\n' >> "$PUBLIC_OUT"
+
 echo "Release public key (DER, Base64):"
-openssl base64 -A -in "$PUB_DER"
+cat "$PUBLIC_OUT"
 echo
 echo
+echo "Saved safe public key file: $PUBLIC_OUT"
+echo "Download that file from CloudShell and move it to your offline/root-key computer."
 echo "The KMS private key is non-exportable and remains inside AWS KMS."
