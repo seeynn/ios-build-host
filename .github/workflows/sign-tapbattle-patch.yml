@@ -98,7 +98,11 @@ jobs:
           PUBLIC_DER="$(mktemp)"
           trap 'rm -f "$PRIVATE_KEY" "$PUBLIC_DER"' EXIT
 
-          printf '%s' "$RELEASE_PRIVATE_KEY_B64" | base64 --decode > "$PRIVATE_KEY"
+          if printf '%s' "$RELEASE_PRIVATE_KEY_B64" | grep -q -- '-----BEGIN .*PRIVATE KEY-----'; then
+            printf '%s\n' "$RELEASE_PRIVATE_KEY_B64" | tr -d '\r' > "$PRIVATE_KEY"
+          else
+            printf '%s' "$RELEASE_PRIVATE_KEY_B64" | tr -d '[:space:]' | base64 --decode > "$PRIVATE_KEY"
+          fi
           openssl pkey -in "$PRIVATE_KEY" -pubout -outform DER -out "$PUBLIC_DER"
 
           EXPECTED_PUBLIC="$(python3 - <<'PY'
@@ -171,7 +175,11 @@ jobs:
           PUBLIC_PEM="$(mktemp)"
           trap 'rm -f "$PRIVATE_KEY" "$SIG_BIN" "$PUBLIC_PEM"' EXIT
 
-          printf '%s' "$RELEASE_PRIVATE_KEY_B64" | base64 --decode > "$PRIVATE_KEY"
+          if printf '%s' "$RELEASE_PRIVATE_KEY_B64" | grep -q -- '-----BEGIN .*PRIVATE KEY-----'; then
+            printf '%s\n' "$RELEASE_PRIVATE_KEY_B64" | tr -d '\r' > "$PRIVATE_KEY"
+          else
+            printf '%s' "$RELEASE_PRIVATE_KEY_B64" | tr -d '[:space:]' | base64 --decode > "$PRIVATE_KEY"
+          fi
           openssl pkey -in "$PRIVATE_KEY" -pubout -out "$PUBLIC_PEM"
 
           MANIFEST="tapbattle-patches/v$PATCH_VERSION/manifest.properties"
