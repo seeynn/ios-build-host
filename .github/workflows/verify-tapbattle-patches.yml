@@ -1,0 +1,92 @@
+name: Verify Tap Battle Patch Release
+
+on:
+  pull_request:
+    paths:
+      - 'tapbattle-patches/**'
+      - '.github/workflows/verify-tapbattle-patches.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'tapbattle-patches/**'
+      - '.github/workflows/verify-tapbattle-patches.yml'
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject mutation of released version folders
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          if [ -n "$BASE" ] && [ "$BASE" != "0000000000000000000000000000000000000000" ]; then
+            BAD="$(git diff --name-status "$BASE" "$GITHUB_SHA" -- 'tapbattle-patches/v*/**' | awk '$1 != "A" {print}')"
+            if [ -n "$BAD" ]; then
+              echo "Released patch version folders are immutable:"
+              echo "$BAD"
+              exit 1
+            fi
+          fi
+
+      - name: Verify latest manifest and immutable payload
+        shell: python
+        run: |
+          import hashlib
+          from pathlib import Path
+
+          root = Path("tapbattle-patches")
+          manifest_path = root / "manifest.properties"
+
+          def read_props(path):
+              result = {}
+              for raw in path.read_text(encoding="utf-8").splitlines():
+                  line = raw.strip()
+                  if not line or line.startswith("#") or "=" not in line:
+                      continue
+                  key, value = line.split("=", 1)
+                  result[key.strip()] = value.strip()
+              return result
+
+          m = read_props(manifest_path)
+          assert m["schema"] in {"1", "2"}
+          version = int(m["patch.version"])
+          assert version > 0
+          assert int(m["core.min"]) <= int(m["core.max"])
+          count = int(m["file.count"])
+          assert 0 <= count <= 4096
+          assert m.get("patch.action", "update") in {"update", "disable", "rollback"}
+
+          total = 0
+          for i in range(count):
+              prefix = f"file.{i}."
+              logical = m[prefix + "path"]
+              source = m[prefix + "source"]
+              assert ".." not in Path(logical).parts
+              assert source.startswith(f"v{version}/"), source
+              payload = root / source
+              assert payload.is_file(), payload
+              data = payload.read_bytes()
+              total += len(data)
+              assert int(m[prefix + "size"]) == len(data)
+              assert m[prefix + "sha256"].lower() == hashlib.sha256(data).hexdigest()
+
+          declared = m.get("patch.totalSize")
+          if declared is not None:
+              assert int(declared) == total
+
+          archived = root / f"v{version}" / "manifest.properties"
+          assert archived.is_file(), archived
+          assert archived.read_bytes() == manifest_path.read_bytes(), "latest manifest must exactly match archived release manifest"
+
+          print(f"PATCH_RELEASE_OK version={version} files={count} bytes={total}")
