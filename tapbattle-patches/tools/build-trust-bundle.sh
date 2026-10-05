@@ -21,6 +21,7 @@ cat > "$OUT_DIR/trusted-keys.properties" <<EOF
 trust.version=$TRUST_VERSION
 valid.from.epoch=$VALID_FROM
 valid.until.epoch=$VALID_UNTIL
+minimum.patch.version=1
 key.count=1
 
 key.0.id=$KEY_ID
