@@ -2,7 +2,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 import hashlib
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 PATCH = ROOT / "v3"
 FILES = PATCH / "files"
 PROJECTUI = FILES / "projectui"
