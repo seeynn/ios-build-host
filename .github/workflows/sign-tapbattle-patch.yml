@@ -1,0 +1,153 @@
+name: Sign Tap Battle Patch With AWS KMS
+
+on:
+  workflow_dispatch:
+    inputs:
+      patch_version:
+        description: Patch version number already staged under tapbattle-patches/vN
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: tapbattle-production-signing
+  cancel-in-progress: false
+
+jobs:
+  sign:
+    name: Sign immutable patch manifest
+    runs-on: ubuntu-latest
+    environment: tapbattle-release
+    timeout-minutes: 10
+    env:
+      AWS_REGION: ${{ vars.TAPBATTLE_AWS_REGION }}
+      AWS_ROLE_ARN: ${{ vars.TAPBATTLE_AWS_ROLE_ARN }}
+      AWS_KMS_KEY_ARN: ${{ vars.TAPBATTLE_AWS_KMS_KEY_ARN }}
+      SIGNING_KEY_ID: ${{ vars.TAPBATTLE_SIGNING_KEY_ID }}
+      PATCH_VERSION: ${{ inputs.patch_version }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Refuse direct main signing
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/heads/release/patch-*) ;;
+            *)
+              echo "Run this workflow only from a release/patch-* branch."
+              exit 1
+              ;;
+          esac
+
+      - name: Validate required configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$AWS_REGION"
+          test -n "$AWS_ROLE_ARN"
+          test -n "$AWS_KMS_KEY_ARN"
+          test -n "$SIGNING_KEY_ID"
+          test -f "tapbattle-patches/v$PATCH_VERSION/manifest.properties"
+
+      - name: Stamp signing metadata and sync latest manifest
+        shell: python
+        run: |
+          from pathlib import Path
+          import os
+
+          version = os.environ["PATCH_VERSION"]
+          key_id = os.environ["SIGNING_KEY_ID"]
+          archived = Path(f"tapbattle-patches/v{version}/manifest.properties")
+          text = archived.read_text(encoding="utf-8")
+
+          lines = [line for line in text.splitlines()
+                   if not line.startswith("signing.keyId=")
+                   and not line.startswith("signing.algorithm=")]
+          lines += ["", f"signing.keyId={key_id}", "signing.algorithm=SHA256withRSA"]
+          final = "\n".join(lines).rstrip() + "\n"
+
+          archived.write_text(final, encoding="utf-8", newline="\n")
+          Path("tapbattle-patches/manifest.properties").write_text(final, encoding="utf-8", newline="\n")
+
+      - name: Validate patch payload before signing
+        shell: python
+        run: |
+          import hashlib, os
+          from pathlib import Path
+
+          root = Path("tapbattle-patches")
+          version = int(os.environ["PATCH_VERSION"])
+          latest = root / "manifest.properties"
+          archived = root / f"v{version}" / "manifest.properties"
+          assert latest.read_bytes() == archived.read_bytes()
+
+          props = {}
+          for raw in latest.read_text(encoding="utf-8").splitlines():
+              line = raw.strip()
+              if line and not line.startswith("#") and "=" in line:
+                  k, v = line.split("=", 1)
+                  props[k.strip()] = v.strip()
+
+          assert int(props["patch.version"]) == version
+          assert props["signing.keyId"] == os.environ["SIGNING_KEY_ID"]
+          assert props["signing.algorithm"] == "SHA256withRSA"
+          count = int(props["file.count"])
+          total = 0
+          for i in range(count):
+              p = f"file.{i}."
+              source = props[p + "source"]
+              assert source.startswith(f"v{version}/")
+              data = (root / source).read_bytes()
+              total += len(data)
+              assert int(props[p + "size"]) == len(data)
+              assert props[p + "sha256"].lower() == hashlib.sha256(data).hexdigest()
+          if "patch.totalSize" in props:
+              assert int(props["patch.totalSize"]) == total
+
+      - name: Configure short-lived AWS credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd
+        with:
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: tapbattle-${{ github.run_id }}
+
+      - name: Sign exact manifest bytes with non-exportable KMS key
+        shell: bash
+        run: |
+          set -euo pipefail
+          MANIFEST="tapbattle-patches/v$PATCH_VERSION/manifest.properties"
+          DIGEST="$(mktemp)"
+          SIG_BIN="$(mktemp)"
+          PUB_DER="$(mktemp)"
+          PUB_PEM="$(mktemp)"
+          trap 'rm -f "$DIGEST" "$SIG_BIN" "$PUB_DER" "$PUB_PEM"' EXIT
+
+          openssl dgst -sha256 -binary "$MANIFEST" > "$DIGEST"
+
+          aws kms sign             --region "$AWS_REGION"             --key-id "$AWS_KMS_KEY_ARN"             --message fileb://"$DIGEST"             --message-type DIGEST             --signing-algorithm RSASSA_PKCS1_V1_5_SHA_256             --query Signature             --output text > "tapbattle-patches/v$PATCH_VERSION/manifest.sig"
+
+          cp "tapbattle-patches/v$PATCH_VERSION/manifest.sig" tapbattle-patches/manifest.sig
+
+          aws kms get-public-key             --region "$AWS_REGION"             --key-id "$AWS_KMS_KEY_ARN"             --query PublicKey             --output text | base64 --decode > "$PUB_DER"
+
+          openssl pkey -pubin -inform DER -in "$PUB_DER" -out "$PUB_PEM"
+          base64 --decode "tapbattle-patches/v$PATCH_VERSION/manifest.sig" > "$SIG_BIN"
+          openssl dgst -sha256 -verify "$PUB_PEM" -signature "$SIG_BIN" "$MANIFEST"
+
+      - name: Commit signed release candidate to this branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "tapbattle-release-bot"
+          git config user.email "tapbattle-release-bot@users.noreply.github.com"
+          git add             tapbattle-patches/manifest.properties             tapbattle-patches/manifest.sig             "tapbattle-patches/v$PATCH_VERSION/manifest.properties"             "tapbattle-patches/v$PATCH_VERSION/manifest.sig"
+          git diff --cached --quiet && { echo "Nothing to sign."; exit 1; }
+          git commit -m "Sign Tap Battle Patch $PATCH_VERSION with AWS KMS"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
