@@ -39,6 +39,35 @@ jobs:
             fi
           fi
 
+      - name: Verify root-signed release-key trust bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT_DER="$(mktemp)"
+          ROOT_PEM="$(mktemp)"
+          TRUST_SIG="$(mktemp)"
+          trap 'rm -f "$ROOT_DER" "$ROOT_PEM" "$TRUST_SIG"' EXIT
+
+          base64 --decode tapbattle-patches/root-public.der.b64 > "$ROOT_DER"
+          openssl pkey -pubin -inform DER -in "$ROOT_DER" -out "$ROOT_PEM"
+          base64 --decode tapbattle-patches/trusted-keys.sig > "$TRUST_SIG"
+          openssl dgst -sha256             -verify "$ROOT_PEM"             -signature "$TRUST_SIG"             tapbattle-patches/trusted-keys.properties
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p = {}
+          for raw in Path("tapbattle-patches/trusted-keys.properties").read_text(encoding="utf-8").splitlines():
+              line = raw.strip()
+              if line and not line.startswith("#") and "=" in line:
+                  k, v = line.split("=", 1)
+                  p[k.strip()] = v.strip()
+          assert int(p["trust.version"]) >= 1
+          assert int(p["minimum.patch.version"]) >= 1
+          assert int(p["key.count"]) >= 1
+          assert any(p.get(f"key.{i}.status") == "trusted" for i in range(int(p["key.count"])))
+          print("PATCH_TRUST_OK")
+          PY
+
       - name: Verify latest manifest and immutable payload
         shell: python
         run: |
