@@ -61,6 +61,16 @@ jobs:
 
           echo "PATCH_VERSION=$VERSION" >> "$GITHUB_ENV"
 
+      - name: Generate staged patch payload when requested
+        shell: bash
+        run: |
+          set -euo pipefail
+          GENERATOR="tapbattle-patches/v$PATCH_VERSION/generate.py"
+          if [ -f "$GENERATOR" ]; then
+            python3 -m pip install --disable-pip-version-check --quiet pillow
+            python3 "$GENERATOR"
+          fi
+
       - name: Validate release configuration
         shell: bash
         run: |
@@ -200,7 +210,8 @@ jobs:
             tapbattle-patches/manifest.properties \
             tapbattle-patches/manifest.sig \
             "tapbattle-patches/v$PATCH_VERSION/manifest.properties" \
-            "tapbattle-patches/v$PATCH_VERSION/manifest.sig"
+            "tapbattle-patches/v$PATCH_VERSION/manifest.sig" \
+            "tapbattle-patches/v$PATCH_VERSION/files"
           git diff --cached --quiet && { echo "Nothing to sign."; exit 1; }
           git commit -m "Sign Tap Battle Patch $PATCH_VERSION"
           git push origin "HEAD:${GITHUB_REF_NAME}"
