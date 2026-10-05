@@ -15,7 +15,36 @@ VALID_UNTIL="$6"
 OUT_DIR="$7"
 
 mkdir -p "$OUT_DIR"
-PUB_B64="$(openssl base64 -A -in "$RELEASE_PUBLIC")"
+if grep -Eq '^[A-Za-z0-9+/=[:space:]]+
+
+cat > "$OUT_DIR/trusted-keys.properties" <<EOF
+trust.version=$TRUST_VERSION
+valid.from.epoch=$VALID_FROM
+valid.until.epoch=$VALID_UNTIL
+minimum.patch.version=1
+key.count=1
+
+key.0.id=$KEY_ID
+key.0.status=trusted
+key.0.algorithm=SHA256withRSA
+key.0.valid.from.epoch=$VALID_FROM
+key.0.valid.until.epoch=$VALID_UNTIL
+key.0.publicKey=$PUB_B64
+EOF
+
+openssl dgst -sha256   -sign "$ROOT_PRIVATE"   -out "$OUT_DIR/trusted-keys.sig.bin"   "$OUT_DIR/trusted-keys.properties"
+
+openssl base64 -A -in "$OUT_DIR/trusted-keys.sig.bin" > "$OUT_DIR/trusted-keys.sig"
+printf '\n' >> "$OUT_DIR/trusted-keys.sig"
+rm -f "$OUT_DIR/trusted-keys.sig.bin"
+
+echo "Created root-signed trust bundle in $OUT_DIR"
+echo "To revoke a release key later: mark its status=revoked, increment trust.version, and sign again with the offline root."
+ "$RELEASE_PUBLIC" && ! openssl pkey -pubin -inform DER -in "$RELEASE_PUBLIC" -noout >/dev/null 2>&1; then
+  PUB_B64="$(tr -d '\r\n\t ' < "$RELEASE_PUBLIC")"
+else
+  PUB_B64="$(openssl base64 -A -in "$RELEASE_PUBLIC")"
+fi
 
 cat > "$OUT_DIR/trusted-keys.properties" <<EOF
 trust.version=$TRUST_VERSION
