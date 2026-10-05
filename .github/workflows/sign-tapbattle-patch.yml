@@ -7,6 +7,11 @@ on:
         description: Patch version number already staged under tapbattle-patches/vN
         required: true
         type: string
+  push:
+    branches:
+      - 'release/patch-*'
+    paths:
+      - 'tapbattle-patches/sign-request'
 
 permissions:
   contents: write
@@ -22,7 +27,7 @@ jobs:
     environment: tapbattle-release
     timeout-minutes: 10
     env:
-      PATCH_VERSION: ${{ inputs.patch_version }}
+      PATCH_VERSION_INPUT: ${{ inputs.patch_version }}
       SIGNING_KEY_ID: ${{ vars.TAPBATTLE_SIGNING_KEY_ID || 'release-2026-01' }}
       RELEASE_PRIVATE_KEY_B64: ${{ secrets.TAPBATTLE_RELEASE_PRIVATE_KEY_B64 }}
 
@@ -31,17 +36,30 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Refuse direct main signing
+      - name: Resolve requested patch version
         shell: bash
         run: |
           set -euo pipefail
-          case "$GITHUB_REF" in
-            refs/heads/release/patch-*) ;;
-            *)
-              echo "Run this workflow only from a release/patch-* branch."
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            VERSION="$PATCH_VERSION_INPUT"
+          else
+            VERSION="$(tr -d '[:space:]' < tapbattle-patches/sign-request)"
+          fi
+
+          case "$VERSION" in
+            ''|*[!0-9]*)
+              echo "Invalid patch version: $VERSION"
               exit 1
               ;;
           esac
+
+          test "$GITHUB_REF_NAME" = "release/patch-$VERSION" || {
+            echo "Branch must be release/patch-$VERSION, got $GITHUB_REF_NAME"
+            exit 1
+          }
+
+          echo "PATCH_VERSION=$VERSION" >> "$GITHUB_ENV"
 
       - name: Validate release configuration
         shell: bash
@@ -170,7 +188,11 @@ jobs:
           set -euo pipefail
           git config user.name "tapbattle-release-bot"
           git config user.email "tapbattle-release-bot@users.noreply.github.com"
-          git add             tapbattle-patches/manifest.properties             tapbattle-patches/manifest.sig             "tapbattle-patches/v$PATCH_VERSION/manifest.properties"             "tapbattle-patches/v$PATCH_VERSION/manifest.sig"
+          git add \
+            tapbattle-patches/manifest.properties \
+            tapbattle-patches/manifest.sig \
+            "tapbattle-patches/v$PATCH_VERSION/manifest.properties" \
+            "tapbattle-patches/v$PATCH_VERSION/manifest.sig"
           git diff --cached --quiet && { echo "Nothing to sign."; exit 1; }
           git commit -m "Sign Tap Battle Patch $PATCH_VERSION"
           git push origin "HEAD:${GITHUB_REF_NAME}"
