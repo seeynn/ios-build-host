@@ -1,0 +1,12 @@
+name: Public Runner Probe
+on:
+  push:
+    branches:
+      - diagnostic/public-runner-probe
+    paths:
+      - '.github/workflows/public-runner-probe.yml'
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - run: sw_vers
